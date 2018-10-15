@@ -1,0 +1,75 @@
+#!/usr/bin/env python3
+import sys
+import os
+import getpass
+
+import alpine_packages
+
+script_dir = os.path.dirname(os.path.realpath(__file__))
+sys.path.insert(0, os.path.join(script_dir, "..", "pylibs"))
+
+import loggy
+loggy.enable = True
+
+image_basename = "alpine-minirootfs-3.8.1-x86_64"
+
+image_squashfs = image_basename + ".sq"
+
+if os.path.exists(image_squashfs):
+    print("Alpine squashfs is already built")
+else:
+    image_dir = os.path.join(script_dir, image_basename)
+
+    if os.path.exists(image_dir):
+        print("Need to build the alpine image squashfs")
+    else:
+        image_tar_basename = image_basename + ".tar.gz"
+        image_tar_filename = os.path.join(script_dir, image_tar_basename)
+
+        if os.path.exists(image_tar_filename):
+            print("Need to extract and build the alpine image squashfs")
+        else:
+            print("Need to download, extract and build the alpine image squashfs")
+
+            print("[ALPINE-IMG-STEP] download the image tar file")
+            image_url = "http://dl-cdn.alpinelinux.org/alpine/v3.8/releases/x86_64/" + image_tar_basename
+            loggy.run(["wget", image_url])
+
+        print("[ALPINE-IMG-STEP] extract the image tar file")
+        user = getpass.getuser()
+        tmp_image_dir = image_dir + ".tmp"
+        if os.path.exists(tmp_image_dir):
+            loggy.rmtree(tmp_image_dir)
+        loggy.mkdir(tmp_image_dir)
+        # HACK: need to use sudo here because the tar image creates device node files
+        loggy.run(["sudo", "tar", "-C", tmp_image_dir, "-xf", image_tar_filename])
+        loggy.run(["sudo", "chown", "-R", user, tmp_image_dir])
+        loggy.run(["sudo", "chgrp", "-R", user, tmp_image_dir])
+        loggy.rename(tmp_image_dir, image_dir)
+        loggy.remove(image_tar_filename)
+
+    # create the squashfs
+    print("[ALPINE-IMG-STEP] build the squashfs")
+    loggy.run(["mksquashfs", image_dir, image_squashfs])
+    loggy.rmtree(image_dir)
+
+
+packer_repo = os.path.join(script_dir, "packer_repo")
+if os.path.exists(packer_repo):
+    print("--------------------------------------------------------------------------------")
+    print("Cleaning packer packer_repo...")
+    print("--------------------------------------------------------------------------------")
+    loggy.run(["packer", "--repo", packer_repo, "purge", "--ignore-not-repo-error"])
+    loggy.rmdir(packer_repo)
+    print("--------------------------------------------------------------------------------")
+
+loggy.mkdir(packer_repo)
+
+# TODO: create a json file for the image
+loggy.run(["packer", "--repo", packer_repo, "init", image_squashfs])
+
+# create packs
+# note: these could be run in paralell
+for package in alpine_packages.list:
+    loggy.run(["packer", "--repo", packer_repo, "new", package])
+    loggy.run(["packer", "--repo", packer_repo, "run", package, "apk", "add", package])

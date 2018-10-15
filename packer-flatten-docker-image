@@ -1,0 +1,93 @@
+#!/usr/bin/env python3
+'''
+A docker image is set of tar files within a tar file. This script will flatten
+out all these tar files into one tar.
+'''
+import os
+import sys
+import argparse
+import json
+import uuid
+
+script_dir = os.path.dirname(__file__)
+sys.path.insert(0, os.path.join(script_dir, "pylibs"))
+
+import loggy
+
+sys.path.insert(0, os.path.join(script_dir, "jsonschema-2.6.0"))
+import jsonschema
+
+parser = argparse.ArgumentParser()
+# we require the output file so that we know which filesystem we are writing to.
+# this way we can build the combined tar file on the same filesystem and then just rename it at the
+# end, preventing an unnecessary copy if it was created on another filesystem
+parser.add_argument("output", help="The output file")
+parser.add_argument("--input", nargs="?", help="The tar file generated from a docker save command")
+parser.add_argument("--noclean", action="store_true", help="Do not clean the temporary files created")
+args = parser.parse_args()
+
+# we need a directory to extract to, we want it to be in the same directory
+# as our output file so it stays on the same filesystem
+if args.input == None:
+    input_name = "<stdin>"
+    input_name_for_file_prefix = "stdin"
+else:
+    input_name = args.input
+    input_name_for_file_prefix = os.path.basename(args.input)
+
+temp_dir = os.path.join(os.path.dirname(args.output) + input_name_for_file_prefix + ".extracted")
+if os.path.exists(temp_dir):
+    # add a random postfix
+    while True:
+        temp_dir = input_name_for_file_prefix + "." + str(uuid.uuid4())
+        if not os.path.exists(temp_dir):
+            break
+
+#
+# Extract the docker tar file
+#
+tar_cmd = ["tar", "-x", "-C", temp_dir]
+
+if args.input == None:
+    if os.isatty(sys.stdin.fileno()):
+        sys.exit("Error: please pipe in a tar file or specify one using --input")
+    loggy.mkdir(temp_dir);
+    loggy.run(tar_cmd, stdin=sys.stdin)
+else:
+    if not os.path.exists(args.input):
+        sys.exit("Error: input file '%s' does not exist" % args.input)
+    loggy.mkdir(temp_dir)
+    loggy.run(tar_cmd + ["-f", args.input])
+
+    
+manifest_filename = os.path.join(temp_dir, "manifest.json")
+if not os.path.exists(manifest_filename):
+    sys.exit("Error: '%s' doesn't appear to be a docker tar image, it is missing 'manifest.json'" % input_name)
+
+def load_and_validate(filename, schema, filename_for_error):
+    with open(filename, "r") as file:
+        json_from_file = json.load(file)
+    with open(os.path.join(script_dir, "schemas", schema)) as file:
+        schema = json.load(file)
+    try:
+        jsonschema.validate(json_from_file, schema)
+    except jsonschema.exceptions.ValidationError as err:
+        print("Error: invalid %s '%s':" % (filename_for_error, manifest_filename))
+        sys.exit(err)
+    return json_from_file
+
+manifest_json = load_and_validate(manifest_filename, "docker_manifest_schema.json", "manifest file")
+if len(manifest_json) != 1:
+    sys.exit("Error: expected manifest to have 1 object in it's global array, but it has %s" % len(manifest_json))
+
+layers = manifest_json[0]["Layers"]
+combined_tar = os.path.join(temp_dir, layers[0])
+for layer_tarfile in layers[1:]:
+    loggy.run(["tar", "--concatenate", "-f", combined_tar, os.path.join(temp_dir, layer_tarfile)])
+
+loggy.rename(combined_tar, args.output)
+
+if args.noclean:
+    print("keeping '%s' because of --no-clean" % temp_dir)
+else:
+    loggy.rmtree(temp_dir)

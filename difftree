@@ -1,0 +1,97 @@
+#!/usr/bin/env python
+'''
+A small script to find the diff between 2 directories.
+'''
+import sys
+import os
+import stat
+import filecmp
+
+if len(sys.argv) != 3:
+   sys.exit("Usage: difftree <dir1> <dir2>")
+
+left_top_dir = sys.argv[1]
+right_top_dir = sys.argv[2]
+
+def lstat_nothrow(path):
+    try:
+        return os.lstat(path)
+    except:
+        return None
+
+files_removed = 0
+size_removed = 0
+files_modified = 0
+size_of_added_mods = 0
+files_added = 0
+size_added = 0
+
+def nice_size(size):
+   for unit in ("", "K", "M", "G"):
+      if size < 1024:
+         return "%s%s" % (size, unit)
+      size /= 1024
+
+# called when a file/directory was found in "right" that was not in left
+def print_added(entry):
+   global files_added
+   global size_added
+   
+   entry_stat = os.lstat(entry)
+   if stat.S_ISDIR(entry_stat.st_mode):
+      for sub_entry in os.listdir(entry):
+         print_added(os.path.join(entry, sub_entry))
+   else:
+      size = os.path.getsize(entry)
+      print("ADD    {0:5} {1}".format(nice_size(size), entry))
+      files_added += 1
+      size_added += size
+
+def diff_dir(left_dir, right_dir):
+   global files_removed
+   global size_removed
+   global files_modified
+   global size_of_added_mods
+   global files_added
+   global size_added
+
+   #print("[DEBUG] diff_dir '%s' '%s'" % (left_dir, right_dir))
+   left_entries = []
+   for entry_basename in os.listdir(left_dir):
+      left_entries.append(entry_basename)
+      left_entry = os.path.join(left_dir, entry_basename)
+      #print("[DEBUG] - '%s'" % left_entry)
+      right_entry = os.path.join(right_dir, entry_basename)
+      left_stat = os.lstat(left_entry)
+      #print("lstat '%s' = %s" % (left_entry, left_stat))
+      if stat.S_ISDIR(left_stat.st_mode):
+         diff_dir(left_entry, right_entry)
+      elif stat.S_ISREG(left_stat.st_mode):
+         if not os.path.exists(right_entry):
+            size = os.path.getsize(left_entry)
+            print("REMOVE {0:5} {1}".format(nice_size(size), left_entry))
+            files_removed += 1
+            size_removed += size
+         else:
+            right_stat = os.lstat(right_entry)
+            if stat.S_ISREG(right_stat.st_mode):
+               if not filecmp.cmp(left_entry, right_entry):
+                  size = os.path.getsize(right_entry)
+                  print("MODIFY {0:5} {1}".format(nice_size(size), left_entry))
+                  files_modified += 1
+                  size_of_added_mods += size
+            else:
+               sys.exit("not impl")
+
+   # TODO: loop through right entries that aren't in "in_left"
+   if os.path.exists(right_dir):
+      for entry_basename in os.listdir(right_dir):
+         if not entry_basename in left_entries:
+            print_added(os.path.join(right_dir, entry_basename))
+
+diff_dir(left_top_dir, right_top_dir)
+
+print("--------------------------------------------------------------------------------")
+print("%s files removed (%s)" % (files_removed, nice_size(size_removed)))
+print("%s files modified (%s)" % (files_modified, nice_size(size_of_added_mods)))
+print("%s files added (%s)" % (files_added, nice_size(size_added)))

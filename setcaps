@@ -1,0 +1,38 @@
+#!/usr/bin/env python3
+
+import os
+import sys
+
+script_dir = os.path.dirname(__file__)
+sys.path.insert(0, os.path.join(script_dir, "pylibs"))
+
+import loggy
+loggy.enable = True
+
+euid = os.geteuid()
+if euid != 0:
+    sys.exit("Error: not running as root (euid=%s)" % euid)
+
+print("running as root")
+
+setup_container_program = os.path.join(script_dir, "packer-setup-container")
+
+# TODO: check if it already has capabilities
+loggy.run(["setcap", "cap_sys_admin+ep", setup_container_program])
+#loggy.run
+
+#file = os.path.join(script_dir, "packer-run")
+#caps = os.listxattr(file)
+#if "security.capability" in caps:
+#    print("already has capabilities")
+#else:
+#    print("no capabilities")
+#loggy.run(["setcap", "cap_sys_admin,cap_setuid,cap_setgid+ep", file])
+
+
+
+#print(os.listxattr(file))
+#print(os.getxattr(file, "security.capability"))
+
+#os.getxattr(, "security.capability")
+#os.getxattr("/bin/ping", "security.capability")

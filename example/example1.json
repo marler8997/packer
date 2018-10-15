@@ -1,0 +1,13 @@
+{
+    "packages" : {
+        "apache2" : {
+            "install" : "apt-get install apache2"
+        },
+        "emacs24" : {
+            "install" : "apt-get install emacs24"
+        }
+    },
+    "packageSets" : {
+        "apachemacs" : ["apache2", "emacs24"]
+    }
+}

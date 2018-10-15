@@ -1,0 +1,95 @@
+#!/usr/bin/env python3
+import os
+import sys
+import stat
+
+script_dir = os.path.dirname(__file__)
+sys.path.insert(0, os.path.join(script_dir, "pylibs"))
+
+import util
+import loggy
+import packer
+
+arg0_basename = os.path.basename(sys.argv[0])
+is_purge = (arg0_basename == "packer-purge")
+
+def usage():
+    if is_purge:
+        print("Usage: packer purge")
+    else:
+        print("Usage: packer clean [<overlays>...]")
+    print("""
+Clean dead containers
+
+Options:
+  --repo|-r <path>     Specify the repo (not in CWD)
+  --verbose|-v         Print verbose information
+  --ignore-not-repo-error
+  --help|-h            Print this usage""")
+
+loggy.enable = True # enable by default
+ignore_not_repo_error = False
+
+repo_dir = "."
+
+cmd_args = []
+argv_index = 1
+while argv_index < len(sys.argv):
+    arg = sys.argv[argv_index]
+    if not arg.startswith("-"):
+        cmd_args.append(arg)
+    elif arg == "-r" or arg == "--repo":
+        argv_index, repo_dir = util.get_opt_arg(argv_index)
+    elif arg == "--verbose" or arg == "-v":
+        loggy.enable = True
+    elif arg == "--ignore-not-repo-error":
+        ignore_not_repo_error = True
+    elif arg == "--help" or arg == "-h":
+        usage()
+        exit(1)
+    else:
+        sys.exit("Error: unknown option '%s'" % arg)
+    argv_index += 1
+
+if is_purge:
+    util.check_arg_count(usage, cmd_args, exact=0)
+
+repo_stat = util.stat_nothrow(repo_dir)
+if repo_stat == None:
+    print("Error: repo '%s' does not exist" % repo_dir)
+
+packer_dir = os.path.join(repo_dir, ".packer_repo")
+packer_dir_stat = util.stat_nothrow(packer_dir)
+if ignore_not_repo_error:
+    if packer_dir_stat == None or not stat.S_ISDIR(packer_dir_stat.st_mode):
+        # not a packer repo, ignore error
+        sys.exit(0)
+else:
+    packer.enforce_is_packer_repo(packer_dir, packer_dir_stat)
+
+repo_stat = util.stat_nothrow(repo_dir)
+if repo_stat == None:
+    sys.exit("Error: repository '%s' does not exist" % repo_dir)
+
+if len(cmd_args) == 0:
+    error_count = packer.clean_repo(repo_dir, repo_stat, is_purge)
+else:
+    for arg in cmd_args:
+        packer.enforce_valid_overlay_name(arg, False)
+    error_count = 0
+    for arg in cmd_args:
+        arg_stat = util.stat_nothrow(arg)
+        if arg_stat == None:
+            print("Error: '%s' does not exist" % arg)
+            error_count += 1
+        elif stat.S_ISDIR(arg_stat.st_mode):
+            # TODO: maybe we should verify it is an overlay?
+            error_count += packer.clean_overlay(repo_stat.st_dev, arg, arg_stat)
+        else:
+            print("Error: '%s' is not a directory" % arg)
+            error_count += 1
+
+if error_count > 0:
+    sys.exit("Error: failed to remove %s entries" % error_count)
+
+print("Success")

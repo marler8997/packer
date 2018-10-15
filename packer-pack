@@ -1,0 +1,122 @@
+#!/usr/bin/env python3
+import os
+import sys
+
+script_dir = os.path.dirname(__file__)
+sys.path.insert(0, os.path.join(script_dir, "pylibs"))
+
+import util
+import loggy
+import packer
+
+def usage():
+    print("""Usage: packer pack <image>
+
+Create a pack from the given image
+
+Options:
+  --repo|-r <path>     Specify the repo (not in CWD)
+  --verbose|-v         Print verbose information
+  --help|-h            Print this usage""")
+
+repo_dir = "."
+
+cmd_args = []
+argv_index = 1
+while argv_index < len(sys.argv):
+    arg = sys.argv[argv_index]
+    if not arg.startswith("-"):
+        cmd_args.append(arg)
+    elif arg == "-r" or arg == "--repo":
+        argv_index, repo_dir = util.get_opt_arg(argv_index)
+    elif arg == "--verbose" or arg == "-v":
+        loggy.enable = True
+    elif arg == "--help" or arg == "-h":
+        usage()
+        exit(1)
+    else:
+        sys.exit("Error: unknown option '%s'" % arg)
+    argv_index += 1
+
+util.check_arg_count(usage, cmd_args, exact=1)
+
+packer_dir = os.path.join(repo_dir, ".packer_repo")
+packer.enforce_is_packer_repo(packer_dir, util.stat_nothrow(packer_dir))
+
+# check that the overlay exists
+image_name = cmd_args[0]
+packer.enforce_valid_overlay_name(image_name, False)
+image_dir = os.path.join(repo_dir, image_name)
+if not os.path.exists(image_dir):
+    sys.exit("Error: overlay '%s' does not exist" % image_dir)
+image_overlay_dir = os.path.join(image_dir, "overlay")
+if not os.path.exists(image_overlay_dir):
+    sys.exit("Error: overlay directory '%s' does not exist" % image_overlay_dir)
+# todo: maybe check if the overlay is mounted?
+
+# read image settings
+packer_image_json_file = os.path.join(repo_dir, ".packer_repo", "config.json")
+if not os.path.exists(packer_image_json_file):
+    sys.exit("NotImplemented: a json file was not used to create this packer repo")
+base_config = packer.PackerImageJson(packer_image_json_file)
+
+packs_dir = os.path.join(repo_dir, "packs")
+if not os.path.exists(packs_dir):
+    loggy.mkdir(packs_dir)
+pack_dir = os.path.join(packs_dir, image_name)
+if os.path.exists(pack_dir):
+    sys.exit("Error: pack '%s' already exists" % pack_dir)
+loggy.mkdir(pack_dir)
+
+'''
+ TODO: create a 'world' directory that
+       maps all the files in all the packages back to
+       their packages.
+
+       So assume we have 2 packs "foo" and "bar".
+       Assume that bar also installed "foo", so we have something like
+       foo:
+         /lib/libfoo.so
+       bar:
+         /lib/libfoo.so
+         /bin/bar
+
+       so assume foo gets "packed" first, then world wil look like
+
+       --- world/lib/libfoo.so
+       foo <hash>
+
+       so then we pack "bar"  when it sees that /lib/libfoo.so already exists,
+       it will check the hash, if it matches it will create a psuedo package and
+       move the file to it
+
+       groupX/lib/libfoo.so
+       --- world/lib/libfoo.so
+       groupX <hash>
+
+       so then it removes the file from foo and bar directories and adds "groupX"
+       as a dependency to both foo and bar
+
+'''
+def copy_dir(root_prefix, src_dir, dst_dir):
+    global base_config
+    for entry_basename in os.listdir(src_dir):
+        root_entry = root_prefix + entry_basename
+        #print("root_entry '%s'" % root_entry)
+        if root_entry in base_config.package_paths:
+            handler = base_config.package_paths[root_entry]
+            if handler == "ignore":
+                print("ignoring '%s'" % root_entry)
+                continue
+            else:
+                sys.exit("Error: unknown path handler '%s' (path=%s)" % (handler, root_entry))
+        src_entry = os.path.join(src_dir, entry_basename)
+        dst_entry = os.path.join(dst_dir, entry_basename)
+        if os.path.isdir(src_entry):
+            copy_dir(root_entry + "/", src_entry, dst_entry)
+        else:
+            if not os.path.exists(dst_dir):
+                loggy.makedirs(dst_dir)
+            loggy.copyfileAndMode(src_entry, dst_entry)
+
+copy_dir("/", image_overlay_dir, pack_dir)

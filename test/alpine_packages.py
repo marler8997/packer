@@ -1,0 +1,16 @@
+list = (
+    "tar",
+    "unzip",
+    "wget",
+    "curl",
+    "python2",
+    "python3",
+    "git",
+    "fakeroot",
+    "squashfs-tools",
+    "gawk",
+    "chrpath",
+    "make",
+    "gcc",
+    #"emacs",
+)

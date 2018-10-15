@@ -1,0 +1,41 @@
+#!/usr/bin/env python3
+import sys
+import os
+import alpine_packages
+
+script_dir = os.path.dirname(os.path.realpath(__file__))
+sys.path.insert(0, os.path.join(script_dir, "..", "pylibs"))
+
+import loggy
+loggy.enable = True
+
+packages = []
+argv_index = 1
+while argv_index < len(sys.argv):
+    arg = sys.argv[argv_index]
+    if not arg.startswith("-"):
+        packages.append(arg)
+    elif arg == "--":
+        argv_index += 1
+        break;
+    else:
+        sys.exit("Error: unknown option '%s'" % arg)
+    argv_index += 1
+
+program_and_args = sys.argv[argv_index:]
+print("packages = %s" % packages)
+print("program = %s" % program_and_args)
+
+if len(program_and_args) == 0:
+    print("Usage: alpine-start-container <packages> -- <program> <args>")
+    print("Packages:")
+    for package in alpine_packages.list:
+        print(" %s" % package)
+    sys.exit(1)
+
+treepack_repo = os.path.join(script_dir, "treepack_repo")
+
+dirs = loggy.run_output(["treepack", "--repo", treepack_repo, "list"] + packages).rstrip(b"\n")
+
+print("dirs = %s" % dirs)
+sys.exit("not impl")

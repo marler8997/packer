@@ -1,0 +1,62 @@
+#!/usr/bin/env python3
+import os
+import sys
+import uuid
+
+script_dir = os.path.dirname(__file__)
+sys.path.insert(0, os.path.join(script_dir, "pylibs"))
+
+import util
+import loggy
+import packer
+
+def usage():
+    print("""Usage: packer run <image> <program> [<args>...]
+
+Run a program inside the base image or overlay
+
+Options:
+  --repo|-r <path>     Specify the repo (not in CWD)
+  --verbose|-v         Print verbose information
+  --help|-h            Print this usage""")
+
+repo_dir = "."
+
+cmd_args = []
+argv_index = 1
+while argv_index < len(sys.argv):
+    arg = sys.argv[argv_index]
+    if not arg.startswith("-"):
+        cmd_args.append(arg)
+    #TODO: add option for overlay
+    #TODO: add option for explitit container id
+    elif arg == "-r" or arg == "--repo":
+        argv_index, repo_dir = util.get_opt_arg(argv_index)
+    elif arg == "--verbose" or arg == "-v":
+        loggy.enable = True
+    elif arg == "--help" or arg == "-h":
+        usage()
+        exit(1)
+    else:
+        sys.exit("Error: unknown option '%s'" % arg)
+    argv_index += 1
+
+if repo_dir != "." and os.path.exists("overlay"): # if we are inside an overlay directory
+    util.check_arg_count(usage, cmd_args, min=1)
+    overlay_dir = "."
+    program_offset = 0
+# TODO: check if we are in the base image directory
+else:
+    if len(cmd_args) < 2:
+        sys.exit("Error: usage 'packer run <image> <program> [<args>...]'")
+    util.check_arg_count(usage, cmd_args, min=2)
+    packer_dir = ".packer_repo" if repo_dir == "." else os.path.join(repo_dir, ".packer_repo")
+    packer.enforce_is_packer_repo(packer_dir, util.stat_nothrow(packer_dir))
+    overlay_name = cmd_args[0]
+    packer.enforce_valid_overlay_name(overlay_name, True)
+    overlay_dir = os.path.join(repo_dir, overlay_name)
+    if not os.path.exists(overlay_dir):
+        sys.exit("Error: overlay '%s' does not exist" % overlay_name)
+    program_offset = 1
+
+packer.run(overlay_dir, cmd_args[program_offset:])

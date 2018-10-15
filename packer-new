@@ -1,0 +1,54 @@
+#!/usr/bin/env python3
+import os
+import sys
+
+script_dir = os.path.dirname(__file__)
+sys.path.insert(0, os.path.join(script_dir, "pylibs"))
+
+import util
+import loggy
+import packer
+
+def usage():
+    print("""Usage: packer new [name]
+
+Allocate a new image
+
+Options:
+  --from|-f <image1>,<image2>...
+                       Override default base image "patched" for the new image
+  --repo|-r <path>     Specify the repo (not in CWD)
+  --verbose|-v         Print verbose information
+  --help|-h            Print this usage""")
+
+repo_dir = "."
+from_ = "patched"
+
+cmd_args = []
+argv_index = 1
+while argv_index < len(sys.argv):
+    arg = sys.argv[argv_index]
+    if not arg.startswith("-"):
+        cmd_args.append(arg)
+    elif arg == "-f" or arg == "--from":
+        argv_index, from_ = util.get_opt_arg(argv_index)
+    elif arg == "-r" or arg == "--repo":
+        argv_index, repo_dir = util.get_opt_arg(argv_index)
+    elif arg == "--verbose" or arg == "-v":
+        loggy.enable = True
+    elif arg == "--help" or arg == "-h":
+        usage()
+        exit(1)
+    else:
+        sys.exit("Error: unknown option '%s'" % arg)
+    argv_index += 1
+
+util.check_arg_count(usage, cmd_args, max=1)
+
+packer_dir = os.path.join(repo_dir, ".packer_repo")
+packer.enforce_is_packer_repo(packer_dir, util.stat_nothrow(packer_dir))
+
+if len(cmd_args) == 0:
+    print(util.clean_pathname(packer.new_overlay_generate_name(repo_dir, from_)))
+else:
+    packer.new_overlay(repo_dir, from_, cmd_args[0])

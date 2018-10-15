@@ -1,0 +1,68 @@
+#!/usr/bin/env python3
+import os
+import sys
+import stat
+
+script_dir = os.path.dirname(__file__)
+sys.path.insert(0, os.path.join(script_dir, "pylibs"))
+
+import util
+import loggy
+import packer
+
+def usage():
+    print("""Usage: packer status
+
+Print packer status
+
+Options:
+  --repo|-r <path>     Specify the repo (not in CWD)
+  --verbose|-v         Print verbose information
+  --help|-h            Print this usage""")
+
+repo_dir = "."
+
+cmd_args = []
+argv_index = 1
+while argv_index < len(sys.argv):
+    arg = sys.argv[argv_index]
+    if not arg.startswith("-"):
+        cmd_args.append(arg)
+        #TODO: add option for overlay
+        #TODO: add option for explitit container id
+    elif arg == "-r" or arg == "--repo":
+        argv_index, repo_dir = util.get_opt_arg(argv_index)
+    elif arg == "--verbose" or arg == "-v":
+        loggy.enable = True
+    elif arg == "--help" or arg == "-h":
+        usage()
+        exit(1)
+    else:
+        sys.exit("Error: unknown option '%s'" % arg)
+    argv_index += 1
+
+util.check_arg_count(usage, cmd_args, exact=0)
+
+packer_dir = os.path.join(repo_dir, ".packer_repo")
+packer.enforce_is_packer_repo(packer_dir, util.stat_nothrow(packer_dir))
+
+# TODO: current implementation of printing overlays is not useful...you
+#       can do the same with with 'ls'.  Need to print containers instead.
+#       it could print all the overlays/base image and their heirarchy
+
+overlay_count = 0
+for entry_basename in os.listdir(repo_dir):
+    entry = os.path.join(repo_dir, entry_basename)
+    entry_stat = util.stat_nothrow(entry)
+    if entry_stat == None:
+        sys.exit("Error: stat on '%s' failed" % entry)
+    if entry_basename in (".packer_repo", "base"):
+        pass
+    elif stat.S_ISDIR(entry_stat.st_mode):
+        print("overlay '%s'" % entry_basename);
+        overlay_count += 1
+    else:
+        print("WARNING: extra file '%s', it is not a known file or overlay")
+
+if overlay_count == 0:
+    print("No overlays")

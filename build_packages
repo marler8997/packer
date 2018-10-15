@@ -1,0 +1,29 @@
+#!/usr/bin/env python3
+
+import os
+import sys
+import argparse
+import json
+
+script_dir = os.path.dirname(__file__)
+sys.path.insert(0, os.path.join(script_dir, "pylibs"))
+
+import loggy
+
+parser = argparse.ArgumentParser()
+parser.add_argument("base_image", help="The base image to create the packages on")
+parser.add_argument("package_file", help="The file containing all the packages")
+args = parser.parse_args()
+
+if not os.path.exists(args.base_image):
+    sys.exit("Error: base_image '%s' does not exist" % args.base_image)
+if not os.path.exists(args.package_file):
+    sys.exit("Error: package_file '%s' does not exist" % args.package_file)
+
+with open(args.package_file, "r") as file:
+     package_json = json.load(file)
+
+# TODO: nice error if ["packages"] does not exist
+
+for name, package in package_json["packages"].items():
+    print("name=%s, pkg=%s" % (name, package))

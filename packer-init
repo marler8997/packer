@@ -1,0 +1,156 @@
+#!/usr/bin/env python3
+import os
+import sys
+import filecmp
+import stat
+
+script_dir = os.path.dirname(__file__)
+sys.path.insert(0, os.path.join(script_dir, "pylibs"))
+
+import util
+import loggy
+import packer
+
+def usage():
+    print("""Usage: packer init <base>
+
+Initialize a packer repository with the given base image or directory
+
+Options:
+  --repo|-r <path>     Specify the repo (not in CWD)
+  --verbose|-v         Print verbose information
+  --help|-h            Print this usage""")
+
+repo_dir = "."
+
+cmd_args = []
+argv_index = 1
+while argv_index < len(sys.argv):
+    arg = sys.argv[argv_index]
+    if not arg.startswith("-"):
+        cmd_args.append(arg)
+    elif arg == "-r" or arg == "--repo":
+        argv_index, repo_dir = util.get_opt_arg(argv_index)
+    elif arg == "--verbose" or arg == "-v":
+        loggy.enable = True
+    elif arg == "--help" or arg == "-h":
+        usage()
+        exit(1)
+    else:
+        sys.exit("Error: unknown option '%s'" % arg)
+    argv_index += 1
+
+util.check_arg_count(usage, cmd_args, exact=1)
+
+base_arg = cmd_args[0]
+base_stat = util.stat_nothrow(base_arg)
+if base_stat == None:
+    sys.exit("Error: '%s' does not exist" % base_arg)
+base_image_is_json = stat.S_ISREG(base_stat.st_mode) and base_arg.endswith(".json")
+
+has_packer_dir = False
+has_base_dir = False
+has_patched_dir = False
+for file in os.listdir(repo_dir):
+    if file == ".packer_repo":
+        has_packer_dir = True
+    elif file == "base":
+        has_base_dir = True
+    elif file == "patched":
+        has_patched_dir = True
+    else:
+        prefix = "this directory" if repo_dir == "." else "'%s'" % repo_dir
+        sys.exit("Error: %s has extra files (i.e. '%s')" % (prefix, file))
+
+packer_dir      = os.path.join(repo_dir, ".packer_repo")
+base_dir        = os.path.join(repo_dir, "base")
+base_rootfs_dir = os.path.join(base_dir, "rootfs")
+
+config_json = os.path.join(packer_dir, "config.json")
+
+#
+# define all our steps (poor man's goto)
+#
+def step_make_packer_dir():
+    global packer_dir
+    loggy.mkdir(packer_dir)
+def step_make_config_json():
+    global base_arg
+    global base_image_is_json
+    global config_json
+    if base_image_is_json:
+        loggy.copyfileAndMode(base_arg, config_json)
+    else:
+        # just write an empty config file
+        with open(config_json, "w") as file:
+            file.write('{}')
+def step_make_base_dir():
+    global base_dir
+    loggy.mkdir(base_dir)
+def step_make_base_rootfs_dir():
+    global base_rootfs_dir
+    loggy.mkdir(base_rootfs_dir)
+def step_mount_base():
+    global base_arg
+    global base_stat
+    global base_dir
+    global base_image_is_json
+    if base_image_is_json:
+        packer.mount_base_from_json(base_arg, config_json, base_rootfs_dir)
+    else:
+        packer.mount_base_rootfs(base_arg, base_stat, base_rootfs_dir)
+def step_make_patched_overlay():
+    global repo_dir
+    packer.new_overlay(repo_dir, "base", "patched")
+def step_do_patches():
+    global repo_dir
+    patched_rootfs = os.path.join(repo_dir, "patched", "rootfs")
+
+    # an idea/hack...but it creates a copy of the entire image!
+    #loggy.run(["sudo", "chown", "-R", current_user, patched_rootfs])
+
+    # dns hack
+    host_dns = os.path.realpath("/etc/resolv.conf")
+    container_dns = os.path.join(patched_rootfs, "etc", "resolv.conf")
+    if os.path.exists(container_dns) and filecmp.cmp(host_dns, container_dns, False):
+        print("'%s' is already installed" % host_dns)
+    else:
+        loggy.copyfileAndMode(host_dns, container_dns)
+
+steps = [
+    step_make_packer_dir,
+    step_make_config_json,
+    step_make_base_dir,
+    step_make_base_rootfs_dir,
+    step_mount_base,
+    step_make_patched_overlay,
+    step_do_patches]
+
+#
+# check which step we may have left of on a previous init
+#
+if not has_packer_dir:
+    first_step = step_make_packer_dir
+elif not os.path.exists(config_json):
+    first_step = step_make_config_json
+elif not has_base_dir:
+    first_step = step_make_base_dir
+elif not os.path.exists(base_rootfs_dir):
+    first_step = step_make_base_rootfs_dir
+else:
+    sys.exit("Error: not-implemented, base rootfs dir '%s' already exists...need to check if it is mounted" % base_rootfs_dir)
+    first_step = step_mount_base
+
+#
+# execute any steps that are not done
+#
+step_index = 0
+while True:
+    assert step_index < len(steps)
+    if steps[step_index] == first_step:
+        break;
+    step_index += 1
+
+while step_index < len(steps):
+    steps[step_index]()
+    step_index += 1
